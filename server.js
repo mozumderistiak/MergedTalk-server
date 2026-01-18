@@ -24,7 +24,7 @@ io.on("connection", socket => {
 
   // User joins a channel
   socket.on("joinChannel", ({ channel, name, photo, password }) => {
-    // Check password for cosmo5
+    // Password check for cosmo5
     if(channel === "cosmo5" && password !== PASSWORDS.cosmo5){
       socket.emit("password-failed");
       return;
@@ -35,17 +35,16 @@ io.on("connection", socket => {
     socket.userName = name;
     socket.userPhoto = photo;
 
-    // Save user in the channel
     channels[channel][socket.id] = { name, photo };
 
-    // Notify all other users in the channel
+    // Notify all others in the channel
     socket.to(channel).emit("user-joined", {
       socketId: socket.id,
       name,
       photo
     });
 
-    // Send existing users in the channel to the new user
+    // Send all existing users to the new user
     for(let id in channels[channel]){
       if(id !== socket.id){
         socket.emit("user-joined", {
@@ -70,10 +69,9 @@ io.on("connection", socket => {
   });
 
   // WebRTC signaling
-  socket.on("signal", msg => {
-    const targetId = msg.to;
-    if(targetId && io.sockets.sockets.get(targetId)){
-      io.to(targetId).emit("signal", { from: socket.id, data: msg.data });
+  socket.on("signal", ({ to, data }) => {
+    if(to && io.sockets.sockets.get(to)){
+      io.to(to).emit("signal", { from: socket.id, data });
     }
   });
 
