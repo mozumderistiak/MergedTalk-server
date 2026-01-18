@@ -20,7 +20,6 @@ const PASSWORDS = {
 };
 
 io.on("connection", socket => {
-
   console.log("New socket connected:", socket.id);
 
   // User joins a channel
@@ -36,16 +35,17 @@ io.on("connection", socket => {
     socket.userName = name;
     socket.userPhoto = photo;
 
+    // Save user in the channel
     channels[channel][socket.id] = { name, photo };
 
-    // Notify all others in this channel about new user
+    // Notify all other users in the channel
     socket.to(channel).emit("user-joined", {
       socketId: socket.id,
       name,
       photo
     });
 
-    // Send current users in channel to the joining socket
+    // Send existing users in the channel to the new user
     for(let id in channels[channel]){
       if(id !== socket.id){
         socket.emit("user-joined", {
@@ -61,7 +61,7 @@ io.on("connection", socket => {
 
   // User leaves a channel
   socket.on("leaveChannel", ({ channel }) => {
-    if(channels[channel] && channels[channel][socket.id]){
+    if(channel && channels[channel] && channels[channel][socket.id]){
       delete channels[channel][socket.id];
       socket.to(channel).emit("user-left", { socketId: socket.id });
       console.log(`${socket.userName} left channel: ${channel}`);
@@ -71,7 +71,10 @@ io.on("connection", socket => {
 
   // WebRTC signaling
   socket.on("signal", msg => {
-    io.to(msg.to).emit("signal", { from: socket.id, data: msg.data });
+    const targetId = msg.to;
+    if(targetId && io.sockets.sockets.get(targetId)){
+      io.to(targetId).emit("signal", { from: socket.id, data: msg.data });
+    }
   });
 
   // Handle disconnect
