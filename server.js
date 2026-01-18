@@ -1,45 +1,86 @@
 // server.js
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-const channels = {}; // Keep track of users per channel
-
-io.on("connection", socket => {
-  console.log("User connected:", socket.id);
-
-  socket.on("joinChannel", ({ channel }) => {
-    if (!channels[channel]) channels[channel] = [];
-    channels[channel].push(socket.id);
-    socket.join(channel);
-
-    // Notify existing users in the channel
-    socket.to(channel).emit("user-joined", { socketId: socket.id });
-
-    // Relay WebRTC signals
-    socket.on("signal", msg => {
-      io.to(msg.to).emit("signal", { from: socket.id, data: msg.data });
-    });
-
-    // Handle leaving
-    socket.on("leaveChannel", () => {
-      socket.leave(channel);
-      channels[channel] = channels[channel].filter(id => id !== socket.id);
-      socket.to(channel).emit("user-left", { socketId: socket.id });
-    });
-
-    // Disconnect handling
-    socket.on("disconnect", () => {
-      channels[channel] = channels[channel].filter(id => id !== socket.id);
-      socket.to(channel).emit("user-left", { socketId: socket.id });
-      console.log("User disconnected:", socket.id);
-    });
-  });
+const io = require("socket.io")(process.env.PORT || 10000, {
+  cors: { origin: "*" }
 });
 
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+console.log("MergedTalk Server running on port", process.env.PORT || 10000);
+
+// Store channels and users
+const channels = {
+  exo1: {},
+  apollo2: {},
+  luna3: {},
+  nova4: {},
+  cosmo5: {} // password-protected
+};
+
+// Password for cosmo5
+const PASSWORDS = {
+  cosmo5: "1016"
+};
+
+io.on("connection", socket => {
+
+  console.log("New socket connected:", socket.id);
+
+  // User joins a channel
+  socket.on("joinChannel", ({ channel, name, photo, password }) => {
+    // Check password for cosmo5
+    if(channel === "cosmo5" && password !== PASSWORDS.cosmo5){
+      socket.emit("password-failed");
+      return;
+    }
+
+    socket.join(channel);
+    socket.channel = channel;
+    socket.userName = name;
+    socket.userPhoto = photo;
+
+    channels[channel][socket.id] = { name, photo };
+
+    // Notify all others in this channel about new user
+    socket.to(channel).emit("user-joined", {
+      socketId: socket.id,
+      name,
+      photo
+    });
+
+    // Send current users in channel to the joining socket
+    for(let id in channels[channel]){
+      if(id !== socket.id){
+        socket.emit("user-joined", {
+          socketId: id,
+          name: channels[channel][id].name,
+          photo: channels[channel][id].photo
+        });
+      }
+    }
+
+    console.log(`${name} joined channel: ${channel}`);
+  });
+
+  // User leaves a channel
+  socket.on("leaveChannel", ({ channel }) => {
+    if(channels[channel] && channels[channel][socket.id]){
+      delete channels[channel][socket.id];
+      socket.to(channel).emit("user-left", { socketId: socket.id });
+      console.log(`${socket.userName} left channel: ${channel}`);
+    }
+    socket.leave(channel);
+  });
+
+  // WebRTC signaling
+  socket.on("signal", msg => {
+    io.to(msg.to).emit("signal", { from: socket.id, data: msg.data });
+  });
+
+  // Handle disconnect
+  socket.on("disconnect", () => {
+    const channel = socket.channel;
+    if(channel && channels[channel] && channels[channel][socket.id]){
+      delete channels[channel][socket.id];
+      socket.to(channel).emit("user-left", { socketId: socket.id });
+      console.log(`${socket.userName} disconnected from channel: ${channel}`);
+    }
+  });
+});
